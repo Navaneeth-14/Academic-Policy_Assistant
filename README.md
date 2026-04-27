@@ -171,8 +171,6 @@ Returns a structured eligibility response in this format:
 
 ---
 
-### `orchestrator.py` — Intent detection and tool dispatch
-
 ### `db.py` — SQLite logging
 
 Two functions:
@@ -270,7 +268,90 @@ fileWatcherType = "none"
 
 ---
 
-## Project Structure
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Streamlit UI                         │
+│  Query Input → Submit → Display Response + Verdict          │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      Agent Runner                           │
+│         Orchestrates 3 agents sequentially                  │
+└──────┬──────────────────┬──────────────────┬────────────────┘
+       │                  │                  │
+       ▼                  ▼                  ▼
+┌─────────────┐  ┌─────────────────┐  ┌──────────────────┐
+│  Agent 0    │  │    Agent 1      │  │    Agent 2       │
+│  Rewriter   │→ │   Retrieval     │→ │   Validation     │
+│             │  │                 │  │                  │
+│ Rewrites    │  │ RAG + MCP       │  │ Checks response  │
+│ vague query │  │ ┌─────────────┐ │  │ is grounded in   │
+│ using LLM   │  │ │ FAISS Index │ │  │ retrieved chunks │
+└─────────────┘  │ │ (embeddings)│ │  │                  │
+                 │ └─────────────┘ │  │ Verdict:         │
+                 │ ┌─────────────┐ │  │ GROUNDED /       │
+                 │ │ Orchestrator│ │  │ PARTIALLY /      │
+                 │ │ (MCP layer) │ │  │ UNVERIFIABLE     │
+                 │ └─────────────┘ │  └──────────────────┘
+                 │ ┌─────────────┐ │
+                 │ │   Tools     │ │
+                 │ │ summarize   │ │
+                 │ │ simplify    │ │
+                 │ │ answer      │ │
+                 │ │ eligibility │ │
+                 │ └─────────────┘ │
+                 └─────────────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │   SQLite (logs.db)    │
+              │   Observability logs  │
+              └───────────────────────┘
+```
+
+---
+
+## Usage
+
+**Run the app:**
+```bash
+streamlit run app.py
+```
+
+**Example queries and expected behaviour:**
+
+| Query | Action | Tool |
+|---|---|---|
+| What is the minimum attendance required? | answer | `answer_with_context` |
+| Give me a brief overview of the grading policy | summarize | `summarize_context` |
+| What does academic probation mean in simple terms? | simplify | `simplify_context` |
+| Am I eligible to appear for the exam? | eligibility check | `check_eligibility` |
+| What is the quantum physics lab policy? | fallback | none (score too low) |
+
+**Upload a custom PDF:**
+- Click "Upload a custom policy PDF" in the UI
+- Upload any text-based academic policy PDF
+- Ask questions — the system indexes the PDF and answers from it
+
+**Run tests:**
+```bash
+python -m pytest tests/ -v
+```
+
+**Run accuracy evaluation (no LLM calls):**
+```bash
+python eval.py
+```
+
+**Run end-to-end smoke test:**
+```bash
+python test_run.py
+```
+
+---
 
 ```
 academic-policy-assistant/
