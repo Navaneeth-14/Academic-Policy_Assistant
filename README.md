@@ -341,10 +341,3 @@ streamlit run app.py
 | Env management | `python-dotenv` |
 
 ---
-
-## What is NOT used
-
-- No LangChain, LlamaIndex, or any agent framework
-- No OpenAI API (Groq's free tier via OpenAI-compatible client)
-- No vector database service (FAISS runs fully in memory)
-- No external database (SQLite file stored locally)
