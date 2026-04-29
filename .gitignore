@@ -14,3 +14,9 @@ logs.db
 
 # Streamlit cache
 .streamlit/
+
+# Chroma persistent vector store
+chroma_db/
+
+# PDF uploads (not committed)
+*.pdf

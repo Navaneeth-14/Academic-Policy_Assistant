@@ -14,15 +14,18 @@ from observability import log_response_generated
 import time
 
 
-def run_agents(query: str, chunks: list, index) -> dict:
+def run_agents(query: str, chunks: list, index,
+               store_type: str = "faiss", collection=None) -> dict:
     """
     Run the full multi-agent pipeline:
       Agent 0 (Rewriter) → Agent 1 (Retrieval) → Agent 2 (Validation)
 
     Args:
-        query:  The user's question
-        chunks: Loaded policy chunks
-        index:  FAISS index
+        query:      The user's question
+        chunks:     Loaded policy chunks
+        index:      FAISS index (None if using Chroma)
+        store_type: "faiss" or "chroma"
+        collection: Chroma collection (None if using FAISS)
 
     Returns:
         Combined dict with all agent outputs
@@ -30,11 +33,14 @@ def run_agents(query: str, chunks: list, index) -> dict:
     start = time.perf_counter()
 
     # Agent 0 — Query Rewriter Agent
-    rewrite_result   = rewriter_agent.run(query)
-    effective_query  = rewrite_result["rewritten_query"]
+    rewrite_result  = rewriter_agent.run(query)
+    effective_query = rewrite_result["rewritten_query"]
 
-    # Agent 1 — Retrieval Agent (uses rewritten query for better retrieval)
-    retrieval_result = retrieval_agent.run(effective_query, chunks, index)
+    # Agent 1 — Retrieval Agent
+    retrieval_result = retrieval_agent.run(
+        effective_query, chunks, index,
+        store_type=store_type, collection=collection
+    )
 
     # Agent 2 — Validation Agent (skip if fallback)
     if retrieval_result["action"] == "fallback":

@@ -41,6 +41,7 @@ def run(query: str) -> dict:
         "Rules:\n"
         "- Do NOT add any new topics, subjects, or keywords not in the original query\n"
         "- Do NOT assume or infer what the user meant beyond what they wrote\n"
+        "- Do NOT remove or change intent words like: summarize, explain, simplify, brief, overview, eligible, eligibility\n"
         "- If the query is already clear, return it exactly as-is\n"
         "- Only fix grammar, sentence structure, or vagueness\n"
         "- Keep the rewritten query under 20 words\n"

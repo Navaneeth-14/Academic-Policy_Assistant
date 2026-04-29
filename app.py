@@ -2,7 +2,8 @@ import os
 import sqlite3
 import tempfile
 import streamlit as st
-from rag import load_chunks, load_chunks_from_pdf, build_index
+from rag import (load_chunks, load_chunks_from_pdf, build_index, retrieve,
+                 build_chroma_index, retrieve_from_chroma)
 from agents.agent_runner import run_agents
 from db import init_db, log_query
 from observability import QueryTimer
@@ -61,7 +62,7 @@ with st.expander("📄 Upload a custom policy PDF"):
 def load_default_rag():
     chunks = load_chunks("data.txt")
     index, _ = build_index(chunks)
-    return chunks, index
+    return chunks, index, "faiss"
 
 if uploaded_pdf:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -69,10 +70,21 @@ if uploaded_pdf:
         tmp_path = tmp.name
     chunks = load_chunks_from_pdf(tmp_path)
     os.unlink(tmp_path)
-    index, _ = build_index(chunks)
-    st.success(f"Loaded {len(chunks)} chunks from uploaded PDF.")
+
+    # Fix 4 — warn if PDF has no extractable text (scanned/image PDF)
+    if not chunks:
+        st.error("⚠️ No text could be extracted from this PDF. It may be a scanned or image-based document. Please upload a text-based PDF.")
+        chunks, index, store_type = load_default_rag()
+        collection = None
+    else:
+        # Use Chroma for PDF — persistent, heading-aware chunks
+        collection = build_chroma_index(chunks)
+        index      = None
+        store_type = "chroma"
+        st.success(f"Loaded {len(chunks)} chunks from PDF (using Chroma index).")
 else:
-    chunks, index = load_default_rag()
+    chunks, index, store_type = load_default_rag()
+    collection = None
 
 # ── Query input ───────────────────────────────────────────────────────────────
 query = st.text_input(
@@ -89,8 +101,10 @@ if submitted and query.strip():
     action_ref = ["unknown"]
     with QueryTimer(query, action_ref):
         with st.spinner("Retrieving and thinking..."):
-            # Run full multi-agent pipeline (Retrieval Agent → Validation Agent)
-            result = run_agents(query, chunks, index)
+            # Run full multi-agent pipeline (Rewriter → Retrieval → Validation)
+            result = run_agents(query, chunks, index,
+                                store_type=store_type,
+                                collection=collection if store_type == "chroma" else None)
             action_ref[0] = result["action"]
 
             # Unpack for display
@@ -129,8 +143,16 @@ if submitted and query.strip():
     st.divider()
 
     # ── Response ──────────────────────────────────────────────────────────────
+    # Fix 2 — treat "no information" LLM responses as soft fallback in UI
+    no_info_response = (
+        result["action"] != "fallback" and
+        "don't have that information" in result["response"].lower()
+    )
+
     if result["action"] == "fallback":
         st.warning(result["response"])
+    elif no_info_response:
+        st.warning("🔍 The system couldn't find relevant information for this query in the loaded document. Try rephrasing or uploading a more specific policy document.")
     else:
         st.markdown("#### Response")
         st.write(result["response"])
