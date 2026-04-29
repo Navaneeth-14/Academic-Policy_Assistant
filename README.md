@@ -57,8 +57,8 @@ The UI shows the action, tool used, confidence bar, response, source chunks, and
 This is the entry point. It:
 1. Initialises the SQLite database on startup
 2. Shows a query history sidebar with the last 10 queries, labeled with action badges (Direct Answer 💬, Summary 📝, Simplified 🧩, Eligibility Check ✅, No Match 🚫)
-3. Offers a PDF uploader — if a PDF is uploaded it builds a fresh index from it, otherwise loads `data.txt` (cached so it only runs once)
-4. Takes the user's query, retrieves chunks, passes the top score to `run_mcp()` for the fallback gate, then displays the result
+3. Offers a PDF uploader — if a PDF is uploaded it builds a fresh Chroma index from it (heading-aware chunking), otherwise loads `data.txt` with FAISS (cached so it only runs once). Shows `st.error()` if the PDF has no extractable text (scanned document).
+4. Takes the user's query, runs the full agent pipeline, and displays the result. "I don't have that information" responses are shown as `st.warning()` to make it visually clear the document didn't contain the answer.
 
 ```python
 # The entire response flow in app.py is just these two calls:
@@ -78,13 +78,19 @@ Contains four functions:
 Reads `data.txt` line by line. When it sees a `[SECTION]` label it starts a new chunk. Each chunk stores the section name and the paragraph text below it.
 
 **`load_chunks_from_pdf(filepath)`**
-Opens a PDF using `pdfplumber`, extracts text page by page, and splits each page into paragraphs on double newlines. Paragraphs shorter than 40 characters are skipped. Each chunk is labelled with its page number.
+Opens a PDF using `pdfplumber`, detects section headings (numbered like `1.`, `2.1`, or ALL CAPS lines) and groups text under each heading as one chunk. Falls back to paragraph splitting if no headings are detected. Deduplicates near-identical chunks to remove repeated page headers/footers. Each chunk is labelled with its detected section name.
 
 **`build_index(chunks)`**
-Encodes all chunk texts into 384-dimensional vectors using `all-MiniLM-L6-v2`. Normalises them to unit length, then adds them to a FAISS `IndexFlatIP` (inner product = cosine similarity on normalised vectors).
+Encodes all chunk texts into 384-dimensional vectors using `all-MiniLM-L6-v2`. Normalises them to unit length, then adds them to a FAISS `IndexFlatIP` (inner product = cosine similarity on normalised vectors). Used for `data.txt`.
 
-**`retrieve(query, chunks, index, top_k=3)`**
-Encodes the query the same way, runs a FAISS search, and returns the top 3 chunks with their section label, text, and similarity score.
+**`build_chroma_index(chunks)`**
+Builds a persistent Chroma collection stored in `./chroma_db/`. Used for PDF uploads — survives app restarts so the index doesn't rebuild on every upload. Uses the same sentence-transformer embeddings.
+
+**`retrieve(query, chunks, index, top_k=5)`**
+Encodes the query, runs a FAISS search, and returns the top 5 chunks with section label, text, and similarity score. Used when `data.txt` is the source.
+
+**`retrieve_from_chroma(query, collection, top_k=5)`**
+Queries the Chroma collection and returns the top 5 chunks in the same format as `retrieve()`. Used when a PDF is uploaded.
 
 ---
 
@@ -97,7 +103,7 @@ Runs first in the pipeline. Takes the raw user query and rewrites it into a clea
 
 **`agents/retrieval_agent.py` — Agent 1**
 Wraps the RAG + orchestrator pipeline into a single agent. Implements a perceive → reason → act loop:
-- Perceive: receives the (rewritten) query, runs retrieval
+- Perceive: receives the (rewritten) query, runs retrieval from either FAISS or Chroma depending on `store_type`
 - Reason: checks confidence, detects intent
 - Act: dispatches to the correct tool, calls LLM
 
@@ -366,7 +372,7 @@ academic-policy-assistant/
 ├── data.txt                → Default policy data
 ├── requirements.txt        → Dependencies
 ├── .env                    → API key (not committed)
-├── .gitignore              → Ignores env/, .env, logs.db
+├── .gitignore              → Ignores env/, .env, logs.db, chroma_db/, *.pdf
 ├── README.md               → Full project documentation
 ├── .streamlit/
 │   └── config.toml         → Disables file watcher
@@ -413,7 +419,7 @@ streamlit run app.py
 | Component | Library / Service |
 |---|---|
 | Embeddings | `sentence-transformers` — `all-MiniLM-L6-v2` |
-| Vector store | `faiss-cpu` (in-memory) |
+| Vector store | `faiss-cpu` (data.txt) + `chromadb` (PDF uploads) |
 | LLM | Groq API — `llama-3.3-70b-versatile` |
 | UI | `streamlit` |
 | PDF parsing | `pdfplumber` |
